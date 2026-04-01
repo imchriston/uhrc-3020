@@ -1,4 +1,7 @@
 """
+# Based on the Hierarchical Reasoning Model architecture
+# Reference: Wang, G. et al. (2025). arXiv:2506.21734
+
 train_uhrc.py  —  UHRC Hierarchical Behavioural Cloning
 Uses  architecture where:
   - H-level subgoal is injected into L-level BEFORE the final attention pass

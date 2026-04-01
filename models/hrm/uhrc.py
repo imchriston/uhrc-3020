@@ -1,3 +1,6 @@
+# Based on the Hierarchical Reasoning Model architecture
+# Reference: Wang, G. et al. (2025). arXiv:2506.21734
+
 import math
 from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
