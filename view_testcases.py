@@ -4,26 +4,28 @@
 #presented named TC01.npz, TC02.npz, etc.
 
 # Usage:
-#   python view_test.py
-#   python view_test.py --trial benchmark_results/trials/TC01.npz
-#   python view_test.py --scenario urban_mixed --grid 2
-#   python view_test.py --env_only
-
-
+#   python view_testcases.py
+#   python view_testcases.py --trial benchmark_results/trials/TC01.npz
+#   python view_testcases.py --scenario urban_mixed --grid 2
+#   python view_testcases.py --env_only
 
 import argparse
 import glob
 import os
 import numpy as np
+
+# np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
+_trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+
 import matplotlib
-matplotlib.use("TkAgg")          
+matplotlib.use("TkAgg")          # swap to "Qt5Agg" if TkAgg is unavailable
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Circle, Rectangle
 from matplotlib.colors  import LinearSegmentedColormap
 from pathlib import Path
 
-#font sizes for readability
+# ── Global font sizes ─────────────────────────────────────────────────────────
 TITLE_FS   = 14
 LABEL_FS   = 13
 TICK_FS    = 11
@@ -31,7 +33,7 @@ LEGEND_FS  = 11
 ANNOT_FS   = 10
 METRIC_FS  = 10
 
-#Color codes
+# ── Palette ───────────────────────────────────────────────────────────────────
 BG        = "#FFFFFF"
 PANEL_BG  = "#F7F8FA"
 GRID_COL  = "#DADDE3"
@@ -41,23 +43,22 @@ GOAL_FACE = "#1E8B4420"
 GOAL_EDGE = "#1E8B44"
 TEXT_MAIN = "#1A1A2E"
 TEXT_SUB  = "#555F70"
-ACCENT    = "#2563EB"       # trajectory (success)
-WARN      = "#D97706"       # timeout
-DANGER    = "#DC2626"       # collision
+ACCENT    = "#2563EB"
+WARN      = "#D97706"
+DANGER    = "#DC2626"
 HOVER_REF = "#6B7280"
 
 ARENA       = (-10.0, 10.0)
 GOAL_RADIUS = 0.5
 GRID_RES    = 0.1
-DT          = 0.01          # simulation timestep (seconds)
+DT          = 0.01
 
 _TC_IDS = {
-    "open_field":      "TC-01", "sparse":          "TC-02",
-    "moderate":        "TC-03", "dense":            "TC-04",
-    "narrow_corridor": "TC-02", "gap_navigation":   "TC-03",
-    "cluttered":       "TC-07", "close_range":      "TC-08",
-    "long_range":      "TC-09", "urban_mixed":      "TC-10",
-    "urban_dense":     "TC-11", "urban_corridor":   "TC-12",
+    "open_field":      "TC-01", "dense":            "TC-02",
+    "narrow_corridor": "TC-03", "gap_navigation":   "TC-04",
+    "close_range":     "TC-05", "long_range":       "TC-06",
+    "dynamic_obstacles": "TC-10", "actuator_fault_sweep": "TC-11",
+    "urban_corridor":  "TC-12", "urban_dense":      "TC-13",
 }
 
 TRAJ_COLOR = {"success": ACCENT, "collision": DANGER, "timeout": WARN}
@@ -65,30 +66,19 @@ TRAJ_COLOR = {"success": ACCENT, "collision": DANGER, "timeout": WARN}
 
 
 def compute_metrics(trial):
-    """
-    Returns a dict with RMSE, IAE, and Path Length Ratio (PLR).
-
-    RMSE  = sqrt( mean( dist_log² ) )   — root-mean-square distance to goal
-    IAE   = sum( dist_log ) * DT         — integral absolute error (m·s)
-    PLR   = path_length / straight_line_dist — 1.0 = perfect straight line
-    """
     dist_log = trial["dist_log"].astype(float)
     traj     = trial["trajectory"]
     start    = trial["start"]
     goal     = trial["goal"]
 
-    # RMSE
     rmse = float(np.sqrt(np.mean(dist_log ** 2)))
 
-    # IAE (trapezoidal integration)
     t_arr = np.arange(len(dist_log)) * DT
-    iae   = float(np.trapezoid(np.abs(dist_log), t_arr))
+    iae   = float(_trapz(np.abs(dist_log), t_arr))
 
-    # Path length (sum of Euclidean step distances)
     diffs       = np.diff(traj[:, :2], axis=0)
     path_length = float(np.sum(np.linalg.norm(diffs, axis=1)))
 
-    # Straight-line distance start → goal
     straight = float(np.linalg.norm(goal[:2] - start[:2]))
     plr      = path_length / max(straight, 1e-6)
 
@@ -141,12 +131,22 @@ def _try_load(d, key):
 
 
 
-def load_trial(npz_path):
-    d        = np.load(npz_path, allow_pickle=False)
+def _detect_format(d) -> str:
+    """Return 'benchmark' or 'legacy' based on keys present in the npz."""
+    if "positions" in d and "dists" in d:
+        return "benchmark"
+    if "trajectory" in d and "dist_log" in d:
+        return "legacy"
+    if "positions" in d:
+        return "benchmark"
+    return "legacy"
+
+
+def _load_legacy(d: np.lib.npyio.NpzFile) -> dict:
+    """Load a trial saved by the old report_trial_plot format."""
     circ_arr = d["circles"]
     rect_arr = d["rects"]
-
-    trial = {
+    return {
         "trajectory":    d["trajectory"],
         "start":         d["start"],
         "goal":          d["goal"],
@@ -167,32 +167,120 @@ def load_trial(npz_path):
         ],
     }
 
-    final            = np.linalg.norm(
-        trial["trajectory"][-1, :2] - trial["goal"][:2])
-    T                = len(trial["trajectory"])
-    trial["final_dist"]  = float(final)
-    trial["success"]     = final < GOAL_RADIUS
-    trial["collision"]   = not trial["success"] and T < 50
-    trial["timeout"]     = not trial["success"] and not trial["collision"]
 
-    fname            = Path(npz_path).stem
-    parts            = fname.rsplit("_trial", 1)
-    trial["scenario"]    = parts[0] if len(parts) == 2 else "unknown"
-    trial["trial_idx"]   = int(parts[1]) if len(parts) == 2 else 0
-    trial["npz_path"]    = str(npz_path)
+def _load_benchmark(d: np.lib.npyio.NpzFile) -> dict:
+    """Load a trial saved by eval_uhrc_benchmark.py.
 
-    # Pre-compute metrics once
+    Key mapping
+    -----------
+    positions       -> trajectory          (T+1, 3) drone path
+    dists           -> dist_log            (T,) distance to goal per step
+    obstacles       -> circles             rows [cx, cy, r]
+    dyn_obstacles   -> appended to circles rows [cx, cy, r]
+    building_cx/cy/sx/sy -> rects          urban scenarios; sx/sy are full widths,
+                                           converted to half-extents (hx, hy)
+    actions_post    -> fz / tau signals    (T, 4) columns: [Fz, tau_phi, tau_theta, tau_psi]
+    """
+    # Trajectory & distances
+    trajectory = d["positions"]   # (T+1, 3)
+    dist_log   = d["dists"]       # (T,)
+
+    # Static + dynamic obstacles → circles list
+    circles: list = []
+    obs_arr = _try_load(d, "obstacles")
+    if obs_arr is not None and len(obs_arr):
+        for row in obs_arr:
+            circles.append(((float(row[0]), float(row[1]), 0.0), float(row[2])))
+
+    dyn_arr = _try_load(d, "dyn_obstacles")
+    if dyn_arr is not None and len(dyn_arr):
+        for row in dyn_arr:
+            circles.append(((float(row[0]), float(row[1]), 0.0), float(row[2])))
+
+    rects: list = []
+    b_cx = _try_load(d, "building_cx")
+    b_cy = _try_load(d, "building_cy")
+    b_sx = _try_load(d, "building_sx")
+    b_sy = _try_load(d, "building_sy")
+    if b_cx is not None and len(b_cx):
+        for cx, cy, sx, sy in zip(b_cx, b_cy, b_sx, b_sy):
+            rects.append((float(cx), float(cy),
+                          float(sx) / 2.0, float(sy) / 2.0))
+
+    # Control signals from actions_post columns
+
+    fz_log = tau_phi_log = tau_theta_log = tau_psi_log = None
+    acts = _try_load(d, "actions_post")
+    if acts is not None and acts.ndim == 2 and acts.shape[1] >= 4:
+        fz_log        = acts[:, 0].copy()
+        tau_phi_log   = acts[:, 1].copy()
+        tau_theta_log = acts[:, 2].copy()
+        tau_psi_log   = acts[:, 3].copy()
+
+    return {
+        "trajectory":    trajectory,
+        "start":         d["start"],
+        "goal":          d["goal"],
+        "dist_log":      dist_log,
+        "fz_log":        fz_log,
+        "tau_phi_log":   tau_phi_log,
+        "tau_theta_log": tau_theta_log,
+        "tau_psi_log":   tau_psi_log,
+        "circles":       circles,
+        "rects":         rects,
+    }
+
+
+def load_trial(npz_path) -> dict:
+    """Load a trial .npz file, auto-detecting whether it was saved by
+    eval_uhrc_benchmark.py or the legacy report_trial_plot format."""
+    d = np.load(npz_path, allow_pickle=False)
+
+    fmt = _detect_format(d)
+    trial = _load_benchmark(d) if fmt == "benchmark" else _load_legacy(d)
+
+    # ── Derive outcome ────────────────────────────────────────────────────
+    final_dist = float(np.linalg.norm(
+        trial["trajectory"][-1, :2] - trial["goal"][:2]))
+    T = len(trial["trajectory"])
+    trial["final_dist"] = final_dist
+    trial["success"]    = final_dist < GOAL_RADIUS
+    trial["collision"]  = not trial["success"] and T < 50
+    trial["timeout"]    = not trial["success"] and not trial["collision"]
+
+
+    fname  = Path(npz_path).stem
+    trial["npz_path"] = str(npz_path)
+
+    if "_t" in fname and "_s" in fname:
+        # benchmark format: e.g. "dense_t000_s42"
+        base = fname.rsplit("_s", 1)[0]          # "dense_t000"
+        parts = base.rsplit("_t", 1)
+        trial["scenario"]  = parts[0] if len(parts) == 2 else "unknown"
+        try:
+            trial["trial_idx"] = int(parts[1]) if len(parts) == 2 else 0
+        except ValueError:
+            trial["trial_idx"] = 0
+    elif "_trial" in fname:
+        # legacy format: e.g. "urban_mixed_trial014"
+        parts = fname.rsplit("_trial", 1)
+        trial["scenario"]  = parts[0] if len(parts) == 2 else "unknown"
+        try:
+            trial["trial_idx"] = int(parts[1]) if len(parts) == 2 else 0
+        except ValueError:
+            trial["trial_idx"] = 0
+    else:
+        trial["scenario"]  = fname
+        trial["trial_idx"] = 0
+
     trial["metrics"] = compute_metrics(trial)
     return trial
 
 
-# Environment with XY trajectory rep occupancy grid
+# Panel 1 — Environment / XY trajectory
+
 
 def plot_environment(trial, caption=True):
-    """
-    2D top-down view: obstacles, trajectory, start/goal, metric box.
-    Opens in its own figure window.
-    """
     circles = trial["circles"]
     rects   = trial["rects"]
     traj    = trial["trajectory"]
@@ -209,7 +297,6 @@ def plot_environment(trial, caption=True):
     fig, ax = plt.subplots(figsize=(7, 7), facecolor=BG)
     ax.set_facecolor(PANEL_BG)
 
-    # Clearance heatmap
     if circles or rects:
         clr      = build_clearance_grid(circles, rects)
         cmap_clr = LinearSegmentedColormap.from_list(
@@ -218,13 +305,11 @@ def plot_environment(trial, caption=True):
                   cmap=cmap_clr, alpha=0.70, vmin=0.0, vmax=5.0,
                   aspect="equal", zorder=0)
 
-    # Occupancy overlay
     occ, ext = build_occupancy_grid(circles, rects)
     cmap_occ = LinearSegmentedColormap.from_list("occ_light", ["none", "#FFCDD2"])
     ax.imshow(occ, extent=ext, origin="lower", cmap=cmap_occ,
               alpha=0.55, vmin=0, vmax=1, aspect="equal", zorder=1)
 
-    # Obstacle outlines
     for (cx, cy, _), r in circles:
         ax.add_patch(Circle((cx, cy), r, lw=1.5,
                             edgecolor=OBS_EDGE, facecolor=OBS_FACE, zorder=2))
@@ -232,13 +317,11 @@ def plot_environment(trial, caption=True):
         ax.add_patch(Rectangle((cx - hx, cy - hy), 2 * hx, 2 * hy, lw=1.5,
                                 edgecolor=OBS_EDGE, facecolor=OBS_FACE, zorder=2))
 
-    # Goal zone
     ax.add_patch(Circle(goal[:2], GOAL_RADIUS, fill=True,
                         facecolor=GOAL_FACE, zorder=3))
     ax.add_patch(Circle(goal[:2], GOAL_RADIUS, fill=False,
                         ls="--", lw=1.5, edgecolor=GOAL_EDGE, zorder=3))
 
-    # Trajectory with gradient opacity
     if len(traj) > 1:
         for i in range(len(traj) - 1):
             alpha = 0.20 + 0.80 * (i / max(len(traj) - 2, 1))
@@ -246,7 +329,6 @@ def plot_environment(trial, caption=True):
                     color=tcolor, lw=2.0, alpha=alpha,
                     solid_capstyle="round", zorder=4)
 
-    # Direction arrows every ~15 steps
     step = max(1, len(traj) // 15)
     for i in range(0, len(traj) - 2, step):
         dx  = traj[i + 1, 0] - traj[i, 0]
@@ -260,7 +342,6 @@ def plot_environment(trial, caption=True):
                                    lw=1.1, alpha=0.60),
                     zorder=5)
 
-    # Markers
     ax.plot(*start[:2], "o", ms=11, color="#16A34A",
             mec="white", mew=1.5, zorder=6)
     ax.plot(*goal[:2],  "*", ms=16, color="#F59E0B",
@@ -268,7 +349,6 @@ def plot_environment(trial, caption=True):
     ax.plot(*traj[-1, :2], "s", ms=10, color=tcolor,
             mec="white", mew=1.2, zorder=6)
 
-    # ── Coordinate annotation ─────────────────────────────────────────────
     def fmt3(v):
         return (f"({v[0]:.2f}, {v[1]:.2f}, {v[2]:.2f})"
                 if len(v) >= 3 else f"({v[0]:.2f}, {v[1]:.2f})")
@@ -286,7 +366,6 @@ def plot_environment(trial, caption=True):
                       edgecolor=GRID_COL, alpha=0.92),
             zorder=8)
 
-    # Metric annotation
     metric_text = (
         f"RMSE : {metrics['rmse']:.3f} m\n"
         f"IAE  : {metrics['iae']:.3f} m·s\n"
@@ -300,7 +379,6 @@ def plot_environment(trial, caption=True):
                       edgecolor=GRID_COL, alpha=0.92),
             zorder=8)
 
-    # Axis cosmetics
     ax.set_xlabel("$x$ (m)", fontsize=LABEL_FS, color=TEXT_SUB)
     ax.set_ylabel("$y$ (m)", fontsize=LABEL_FS, color=TEXT_SUB)
     ax.set_xlim(ARENA)
@@ -311,7 +389,6 @@ def plot_environment(trial, caption=True):
     for sp in ax.spines.values():
         sp.set_edgecolor(GRID_COL)
 
-    # Legend
     handles = [
         mpatches.Patch(color=tcolor, alpha=0.85,
                        label=f"{outcome.capitalize()}  "
@@ -332,25 +409,20 @@ def plot_environment(trial, caption=True):
     leg.set_draggable(True)
 
     if caption:
-        tc_str = f"{tc}  ·  {sc.replace('_', ' ').title()}"
-        out    = ("Success" if trial["success"]
-                  else "Collision" if trial["collision"] else "Timeout")
+        out = ("Success" if trial["success"]
+               else "Collision" if trial["collision"] else "Timeout")
         fig.suptitle(
-            f"UHRC XY Trajectory — TC03 Gap Navigation   "
-            f"[Trial {trial['trial_idx']}  ·  {out}]",
+            f"UHRC XY Trajectory "
+            f"[{tc}  ·  {sc.replace('_', ' ').title()}  ·  Trial {trial['trial_idx']}  ·  {out}]",
             fontsize=TITLE_FS, fontweight="bold", color=TEXT_MAIN)
 
     fig.tight_layout()
     return fig
 
 
-# Distance-to-goal over time  
+# Panel 2 — Distance-to-goal over time
 
 def plot_distance(trial, caption=True):
-    """
-    Distance-to-goal time series with RMSE / IAE annotations.
-    Opens in its own figure window.
-    """
     dist_log = trial["dist_log"]
     metrics  = trial["metrics"]
     t_ax     = np.arange(len(dist_log)) * DT
@@ -370,12 +442,9 @@ def plot_distance(trial, caption=True):
                     alpha=0.12, color=ACCENT, zorder=2)
     ax.axhline(GOAL_RADIUS, color=GOAL_EDGE, ls="--", lw=1.4, zorder=4,
                label=f"Goal threshold  ({GOAL_RADIUS} m)")
-
-    # Outcome marker at final step
     ax.axvline(t_ax[-1], color=tcolor, ls=":", lw=1.3, alpha=0.7,
                label=f"{outcome.capitalize()}")
 
-    # Metric annotation box
     metric_text = (
         f"RMSE : {metrics['rmse']:.3f} m\n"
         f"IAE  : {metrics['iae']:.3f} m·s\n"
@@ -410,13 +479,9 @@ def plot_distance(trial, caption=True):
     return fig
 
 
-#  Control inputs U1–U4 plotted
+# Panel 3 — Control inputs U1–U4
 
 def plot_control(trial, caption=True):
-    """
-    Control input time series: Fz (N), τ_φ, τ_θ, τ_ψ (N·m).
-    Opens in its own figure window.
-    """
     sc  = trial["scenario"]
     tc  = _TC_IDS.get(sc, "??")
     out = ("Success" if trial["success"]
@@ -429,7 +494,6 @@ def plot_control(trial, caption=True):
         ("tau_psi_log",   r"$\tau_\psi$ (N·m)",   "#DC2626"),
     ]
 
-    # Count how many signals are actually present
     present = [(k, lbl, c) for k, lbl, c in ctrl_signals
                if trial.get(k) is not None and len(trial[k]) > 0]
 
@@ -450,8 +514,7 @@ def plot_control(trial, caption=True):
     else:
         ax.text(0.5, 0.5,
                 "Control logs not saved in .npz\n"
-                "Add  fz_log / tau_phi_log / tau_theta_log / tau_psi_log\n"
-                "to your benchmark trial save call.",
+                "(actions_post array not found)",
                 ha="center", va="center",
                 transform=ax.transAxes,
                 fontsize=LABEL_FS, color=TEXT_SUB)
@@ -477,13 +540,9 @@ def plot_control(trial, caption=True):
     return fig
 
 
-# Drones Environment  plot 
+# Environment-only plot 
 
 def plot_env_only(trial, caption=True):
-    """
-    Just the 2D environment map — no trajectory, no time series.
-    Useful for the Methodology section describing test scenarios.
-    """
     circles = trial["circles"]
     rects   = trial["rects"]
     sc      = trial["scenario"]
@@ -543,10 +602,9 @@ def plot_env_only(trial, caption=True):
     return fig
 
 
-# Grid comparison plot for easy comparing
+# Grid comparison  (multiple trials in one figure)
 
 def plot_grid(trials, cols=2):
-
     import matplotlib.gridspec as mgridspec
 
     fig = plt.figure(figsize=(7 * cols, 7), facecolor=BG)
@@ -557,7 +615,7 @@ def plot_grid(trials, cols=2):
 
     for col, trial in enumerate(trials[:cols]):
         ax = fig.add_subplot(gs[0, col])
-        draw_env_on_ax(ax, trial, label_prefix=f"({chr(97 + col)}) ")
+        _draw_env_on_ax(ax, trial, label_prefix=f"({chr(97 + col)}) ")
 
     scenarios = "  ·  ".join(
         f"{_TC_IDS.get(t['scenario'], '??')} "
@@ -569,8 +627,7 @@ def plot_grid(trials, cols=2):
     return fig
 
 
-def draw_env_on_ax(ax, trial, label_prefix=""):
-    """func to draw env panel onto existing Axes."""
+def _draw_env_on_ax(ax, trial, label_prefix=""):
     circles = trial["circles"]
     rects   = trial["rects"]
     traj    = trial["trajectory"]
@@ -625,7 +682,6 @@ def draw_env_on_ax(ax, trial, label_prefix=""):
     ax.plot(*traj[-1, :2], "s", ms=9, color=tcolor,
             mec="white", mew=1.2, zorder=6)
 
-    # Metric box
     metric_text = (
         f"RMSE : {metrics['rmse']:.3f} m\n"
         f"IAE  : {metrics['iae']:.3f} m·s\n"
@@ -639,9 +695,9 @@ def draw_env_on_ax(ax, trial, label_prefix=""):
                       edgecolor=GRID_COL, alpha=0.92),
             zorder=8)
 
-    tc_str = f"{label_prefix}{tc} {sc.replace('_', ' ').title()}"
-    ax.set_title(tc_str, fontsize=TITLE_FS - 1,
-                 fontweight="bold", color=TEXT_MAIN, pad=5)
+    ax.set_title(f"{label_prefix}{tc}  ·  {sc.replace('_', ' ').title()}",
+                 fontsize=TITLE_FS - 1, fontweight="bold",
+                 color=TEXT_MAIN, pad=5)
     ax.set_xlabel("$x$ (m)", fontsize=LABEL_FS, color=TEXT_SUB)
     ax.set_ylabel("$y$ (m)", fontsize=LABEL_FS, color=TEXT_SUB)
     ax.set_xlim(ARENA)
@@ -652,10 +708,14 @@ def draw_env_on_ax(ax, trial, label_prefix=""):
     for sp in ax.spines.values():
         sp.set_edgecolor(GRID_COL)
 
-    handles = [mpatches.Patch(color=tcolor, alpha=0.85,
+    handles = [
+        mpatches.Patch(color=tcolor, alpha=0.85,
                        label=f"{outcome.capitalize()}  "
-                             f"(d = {trial['final_dist']:.2f} m)"), mpatches.Patch(color=OBS_EDGE, alpha=0.55, label="Obstacle"),mpatches.Patch(color=GOAL_EDGE, alpha=0.55,
-                       label=f"Goal  (r = {GOAL_RADIUS} m)"), plt.Line2D([0], [0], marker="o", color="w",
+                             f"(d = {trial['final_dist']:.2f} m)"),
+        mpatches.Patch(color=OBS_EDGE, alpha=0.55, label="Obstacle"),
+        mpatches.Patch(color=GOAL_EDGE, alpha=0.55,
+                       label=f"Goal  (r = {GOAL_RADIUS} m)"),
+        plt.Line2D([0], [0], marker="o", color="w",
                    markerfacecolor="#16A34A", ms=9, label="Start"),
         plt.Line2D([0], [0], marker="*", color="w",
                    markerfacecolor="#F59E0B", ms=11, label="Goal"),
@@ -669,14 +729,15 @@ def draw_env_on_ax(ax, trial, label_prefix=""):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Report-quality UHRC trial plots — each panel in its own window")
+        description="Report-quality UHRC trial plots — each panel in its own window.\n"
+                    "Accepts both eval_uhrc_benchmark.py .npz files and legacy format.")
     p.add_argument("--trial",      type=str,
-                   default="benchmark_results/trials/open_field_trial001.npz",
+                   default="benchmark_results/timeseries/open_field_t009_s9.npz",
                    help="Path to a single .npz trial file")
     p.add_argument("--scenario",   type=str, default=None,
                    help="Scenario name filter (use with --grid)")
     p.add_argument("--dir",        type=str,
-                   default="benchmark_results/trials",
+                   default="benchmark_results/timeseries",
                    help="Directory containing .npz trial files")
     p.add_argument("--grid",       type=str, default=None,
                    help="Side-by-side grid of N trials (e.g. --grid 2)")
@@ -694,15 +755,22 @@ def main():
     n_col = int(args.grid) if args.grid else 1
 
     if args.scenario:
-        pattern = os.path.join(args.dir, f"{args.scenario}_trial*.npz")
-        paths   = sorted(glob.glob(pattern))[:max(n_col, 1)]
+        # Match both benchmark naming ({scenario}_t*_s*.npz) and legacy (*_trial*.npz)
+        patterns = [
+            os.path.join(args.dir, f"{args.scenario}_t*_s*.npz"),
+            os.path.join(args.dir, f"{args.scenario}_trial*.npz"),
+        ]
+        paths = []
+        for pat in patterns:
+            paths.extend(sorted(glob.glob(pat)))
+        paths = paths[:max(n_col, 1)]
     elif args.grid:
-        paths   = sorted(glob.glob(os.path.join(args.dir, "*.npz")))[:n_col]
+        paths = sorted(glob.glob(os.path.join(args.dir, "*.npz")))[:n_col]
     else:
-        paths   = [args.trial]
+        paths = [args.trial]
 
     if not paths:
-        print("No trial files found ")
+        print("No trial files found. Check --trial / --dir / --scenario.")
         return
 
     trials = [load_trial(p) for p in paths]
@@ -728,17 +796,14 @@ def main():
 
     if args.env_only:
         plot_env_only(trials[0], caption=caption)
-
     elif args.grid and len(trials) > 1:
-        # Grid view: one combined figure
         plot_grid(trials, cols=n_col)
-
     else:
         trial = trials[0]
-        fig1 = plot_environment(trial, caption=caption)
-        fig2 = plot_distance(trial,    caption=caption)
+        plot_environment(trial, caption=caption)
+        plot_distance(trial,    caption=caption)
         if not args.no_control:
-            fig3 = plot_control(trial, caption=caption)
+            plot_control(trial, caption=caption)
 
     plt.show()
 
