@@ -19,7 +19,6 @@ def yaw_from_q_BI_wxyz_np(q_BI: NDArray[np.float64]) -> float:
 
 
 def wrap_to_pi_np(a: float) -> float:
-    # stable wrap using atan2(sin, cos)
     return float(np.arctan2(np.sin(a), np.cos(a)))
 
 
@@ -41,7 +40,6 @@ class UHRCController:
 
         state_dim = int(stats["input_mean"].numel())
 
-        # 2) Initialize Model Architecture
         self.config = UHRC_Config(
             state_dim=state_dim,
             action_dim=4,
@@ -101,7 +99,6 @@ class UHRCController:
 
             x_in = np.concatenate([x, e_pos, yaw_feat], axis=0).astype(np.float32)  # 22 dims
 
-            # Build either 21D (e_yaw) or 22D (sin/cos) depending on stats
             if expected_dim == 21:
                 tail = np.concatenate([e_pos, np.array([e_yaw], dtype=np.float64)], axis=0)
             elif expected_dim == 22:
@@ -113,7 +110,6 @@ class UHRCController:
             x_in = np.concatenate([x, tail], axis=0).astype(np.float32)
 
         else:
-            # state_ref path should match stats too
             x_in = np.concatenate([x, current_ref], axis=0).astype(np.float32)
 
         # Safety check before torch conversion
@@ -132,7 +128,7 @@ class UHRCController:
             u_norm, new_carry = self.model(x_norm.unsqueeze(0), carry=self.carry)
             self.carry = None
 
-        # 5) Denormalize + postprocess
+        # Denormalize + postprocess
         u_tensor = u_norm[0] * self.action_std + self.action_mean
         u_out = u_tensor.cpu().numpy().astype(np.float64)
         # in __init__

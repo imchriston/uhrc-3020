@@ -18,9 +18,7 @@ def view_dataset():
     print(f"Total Transitions: {total_transitions:,}")
     print(f"Total Episodes: {len(unique_eps)}")
     
-    # ── 1. Calculate Braking vs Cruising Imbalance ──
-    # Assuming obs[12] is goal_dist_norm (0.0 to 1.0)
-    # 0.1 normalized roughly equals 2.0 meters (if GOAL_RANGE is 20)
+ 
     near_goal_mask = obs[:, 12] < 0.1
     braking_steps = np.sum(near_goal_mask)
     cruising_steps = total_transitions - braking_steps
@@ -29,17 +27,14 @@ def view_dataset():
     print(f"  Cruising Steps (>2m) : {cruising_steps:,} ({cruising_steps/total_transitions*100:.1f}%)")
     print(f"  Braking Steps  (<2m) : {braking_steps:,} ({braking_steps/total_transitions*100:.1f}%)")
     
-    # ── 2. Plotting ──
     fig, axs = plt.subplots(2, 2, figsize=(16, 10))
     fig.suptitle("UHRC Dataset Analysis", fontsize=16)
     
-    # Plot A: XY Trajectories of first 15 episodes
     ax = axs[0, 0]
     for ep in unique_eps[:15]:
         mask = (ep_ids == ep)
         ep_obs = obs[mask]
-        # Integrating velocity (obs 0,1) roughly to show path shape (since raw XY isn't in obs)
-        # Note: This is an approximation since we don't save raw X/Y in the npz
+  
         vx, vy = ep_obs[:, 0], ep_obs[:, 1]
         x = np.cumsum(vx) * 0.01
         y = np.cumsum(vy) * 0.01
@@ -56,13 +51,13 @@ def view_dataset():
     ax.hist(theta_deg, bins=100, alpha=0.5, label='Pitch (theta)', color='orange')
     ax.set_title("Distribution of Attitude Commands")
     ax.set_xlabel("Degrees")
-    ax.set_yscale('log') # Log scale reveals the extreme imbalance
+    ax.set_yscale('log') 
     ax.legend()
     ax.grid(True, alpha=0.3)
     
     # Plot C & D: A single episode's profile
     ep_mask = (ep_ids == unique_eps[558])
-    ep_dist = obs[ep_mask][:, 12] * 20.0 # Assuming 20m GOAL_RANGE
+    ep_dist = obs[ep_mask][:, 12] * 20.0 
     ep_phi = np.degrees(actions[ep_mask][:, 0])
     ep_theta = np.degrees(actions[ep_mask][:, 1])
     time_arr = np.arange(len(ep_dist)) * 0.01

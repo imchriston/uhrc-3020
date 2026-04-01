@@ -116,7 +116,6 @@ class AttitudePID:
 
         # 3. Logging (Grab the current refs directly)
         self.log_t.append(t)
-        # Log 0 for x/y ref since this is attitude mode, but keep z
         self.log_r_ref.append([0.0, 0.0, self.refs['z']]) 
         self.log_phi_d.append(self.refs['phi'])
         self.log_theta_d.append(self.refs['theta'])

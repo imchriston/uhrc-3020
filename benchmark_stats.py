@@ -1,7 +1,7 @@
 """
 eval_uhrc_benchmark.py
 ======================
-Structured Monte-Carlo benchmark for the UHRC waypoint controller.
+Structured Monte-Carlo benchmark for the UHRC controller.
 
 Scenarios:
   TC-01  open_field        0 obstacles
@@ -21,9 +21,9 @@ Per-trial output (saved to npz):
   trajectory, start, goal, obstacles_circles, obstacles_rects, metrics
 
 Usage:
-  python eval_uhrc_benchmark.py
-  python eval_uhrc_benchmark.py --scenario urban_mixed --n 20 --verbose
-  python eval_uhrc_benchmark.py --quick
+  python benchmark_stats.py
+  python benchmark_stats.py --scenario urban_mixed --n 20 --verbose
+  python benchmark_stats.py --quick
 """
 from __future__ import annotations
 
@@ -43,21 +43,21 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Circle, Rectangle
 
-import dynamics
-from generate_data_sensors import get_lidar_scan
-from uhrc_ctrl_wp import UHRCWaypointController
+import drone.dynamics as dynamics
+from generate_data import get_lidar_scan
+from uhrc_ctrl import UHRCController
 import utils.quat_euler as quat_euler
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-MODEL_PATH      = "checkpoints/uhrc_best_waypoint.pth"
-STATS_PATH      = "checkpoints/norm_stats_waypoint.npz"
+MODEL_PATH      = "checkpoints/uhrc_best.pth"
+STATS_PATH      = "checkpoints/norm_stats.npz"
 DT              = 0.01
 MAX_STEPS       = 1500
 GOAL_RADIUS     = 0.5
 CONVERGE_THRESH = 1.0
 HOVER_THRUST    = 9.81
 ARENA           = (-10.0, 10.0)
-DEFAULT_TRIALS  = 20
+DEFAULT_TRIALS  = 30
 
 OBS_COUNT = {
     "open_field":       0,
@@ -69,9 +69,9 @@ OBS_COUNT = {
     "cluttered":        8,
     "close_range":      2,
     "long_range":       4,
-    "urban_mixed":      5,      # 3 rect + 2 circle
-    "urban_dense":      5,      # 5 rect
-    "urban_corridor":   6,      # rect buildings forming a street
+    "urban_mixed":      5,      
+    "urban_dense":      5,      
+    "urban_corridor":   6,      
 }
 
 _TC_IDS = {
@@ -145,7 +145,6 @@ def lidar_scan_mixed(pos, yaw, circles, rects,
     Rects:   list of RectBuilding
     Returns ranges [N] matching get_lidar_scan signature.
     """
-    # Start with circles using existing function
     ranges = get_lidar_scan(pos, yaw, circles, num_rays=num_rays,
                             fov=fov, max_range=max_range)
 
@@ -181,9 +180,7 @@ def rect_clearance(r_I, bld: RectBuilding) -> float:
     return float(np.sqrt(dx*dx + dy*dy))
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 #  OBSTACLE BUILDERS
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _min_sep(centers, cand, radii, r_c, margin=0.3):
     for c, r in zip(centers, radii):
@@ -281,7 +278,6 @@ def build_urban_corridor(start, goal, rng):
     d    = np.linalg.norm(goal[:2] - start[:2])
 
     rects = []
-    # Place buildings along both sides of the path
     n_per_side = 3
     spacing = d / (n_per_side + 1)
     corridor_half = 2.0 + float(rng.uniform(0.0, 0.5))
@@ -328,9 +324,7 @@ def _sample_start_goal(scenario, rng):
         return start, start + np.array([6.0, 0.0, 0.0])
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 #  DATA STRUCTURES
-# ══════════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class TrialResult:
@@ -376,9 +370,8 @@ class ScenarioStats:
     mean_wall_time_s:      float
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+
 #  SINGLE TRIAL RUNNER
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _rk4_step(dyn, t, x, u, dt=DT):
     def f(tt, xx): return dyn.f(tt, xx, u, "body_wrench")
@@ -401,12 +394,12 @@ def run_trial(scenario, trial_idx, seed, verbose=False, save_dir=None):
 
     params = dynamics.QuadrotorParams()
     dyn    = dynamics.QuadrotorDynamics(params)
-    ctrl   = UHRCWaypointController(MODEL_PATH, STATS_PATH, device="cpu")
+    ctrl   = UHRCController(MODEL_PATH, STATS_PATH, device="cpu")
     ctrl.reset()
 
     start, goal = _sample_start_goal(scenario, rng)
 
-    # ── Build obstacles ───────────────────────────────────────────────────
+    # Build obstacles
     circles = []
     rects   = []
 
@@ -468,12 +461,11 @@ def run_trial(scenario, trial_idx, seed, verbose=False, save_dir=None):
         if conv_step == -1 and dist < CONVERGE_THRESH:
             conv_step = step
 
-        # Clearance: circles
+        # Clearance to ensure obstacle is not spawned on top of drone at start or ar the goal
         clearances = []
         for c, r_obs in circles:
             clearances.append(
                 float(np.linalg.norm(r_I[:2] - np.asarray(c[:2]))) - float(r_obs))
-        # Clearance: rects
         for bld in rects:
             clearances.append(rect_clearance(r_I, bld))
         if clearances:
@@ -495,7 +487,6 @@ def run_trial(scenario, trial_idx, seed, verbose=False, save_dir=None):
             float(np.linalg.norm(r_new[:2] - np.asarray(c[:2]))) < float(r_obs)
             for c, r_obs in circles
         )
-        # Collision: rects
         hit_rect = rect_collision(r_new, rects)
 
         reached = float(np.linalg.norm(r_new[:2] - goal[:2])) < GOAL_RADIUS
@@ -547,35 +538,32 @@ def run_trial(scenario, trial_idx, seed, verbose=False, save_dir=None):
     else:
         rect_arr = np.zeros((0, 4), dtype=np.float32)
 
-    # ── Outcome encoding (stored explicitly so viewer never has to infer) ──
     # outcome_code: 1 = success, 2 = collision, 0 = timeout
     outcome_code = np.int8(1 if success else (2 if collision else 0))
 
     trial_data = {
-        # ── Geometry ────────────────────────────────────────────────────
         "trajectory":      path.astype(np.float32),            # [T+1, 3]
         "start":           start.astype(np.float32),           # [3]
         "goal":            goal.astype(np.float32),            # [3]
         "circles":         circ_arr,                           # [N, 3] cx cy r
         "rects":           rect_arr,                           # [M, 4] cx cy hx hy
-        # ── Outcome (explicit — do not recompute from trajectory) ───────
         "outcome_code":    np.array([outcome_code], dtype=np.int8),  # 1=success 2=collision 0=timeout
         "success":         np.array([success],   dtype=bool),
         "collision":       np.array([collision], dtype=bool),
         "timeout":         np.array([not success and not collision], dtype=bool),
         "final_dist":      np.array([final_dist], dtype=np.float32),
         "seed":            np.array([seed],       dtype=np.int64),
-        # ── Control inputs U1–U4 ────────────────────────────────────────
-        "fz_log":          fz_arr.astype(np.float32),          # [T]  U1 thrust (N)
-        "tau_phi_log":     np.array(tau_phi_log,   dtype=np.float32),  # [T]  U2 roll  (N·m)
-        "tau_theta_log":   np.array(tau_theta_log, dtype=np.float32),  # [T]  U3 pitch (N·m)
-        "tau_psi_log":     np.array(tau_psi_log,   dtype=np.float32),  # [T]  U4 yaw   (N·m)
-        # ── Navigation logs ─────────────────────────────────────────────
-        "dist_log":        np.array(dists,        dtype=np.float32),   # [T]
-        "subgoal_log":     np.array(subgoal_log,  dtype=np.float32),   # [T, 2]
+        #Control inputs U1–U4 
+        "fz_log":          fz_arr.astype(np.float32),          #   U1 thrust (N)
+        "tau_phi_log":     np.array(tau_phi_log,   dtype=np.float32),  #  U2 roll  (N·m)
+        "tau_theta_log":   np.array(tau_theta_log, dtype=np.float32),  #  U3 pitch (N·m)
+        "tau_psi_log":     np.array(tau_psi_log,   dtype=np.float32),  #  U4 yaw   (N·m)
+        # Navigation logs 
+        "dist_log":        np.array(dists,        dtype=np.float32),   
+        "subgoal_log":     np.array(subgoal_log,  dtype=np.float32),   
     }
 
-    # Save per-trial npz if directory specified
+    # Save per-trial npz 
     if save_dir is not None:
         trial_path = os.path.join(save_dir, "trials",
                                   f"{scenario}_trial{trial_idx:03d}.npz")
@@ -585,9 +573,7 @@ def run_trial(scenario, trial_idx, seed, verbose=False, save_dir=None):
     return result, trial_data
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  AGGREGATE + OUTPUT
-# ══════════════════════════════════════════════════════════════════════════════
+#  AGGREGATE OUTPUT
 
 def compute_stats(trials):
     sc = trials[0].scenario; n = len(trials)
@@ -725,7 +711,7 @@ def plot_trial(trial_data, result, out_path):
         cx, cy, r = trial_data["circles"][i]
         ax.add_patch(Circle((cx, cy), r, color="tomato", alpha=0.5))
 
-    # Draw rectangles (buildings)
+    # Draw rectangles 
     for i in range(len(trial_data["rects"])):
         cx, cy, hx, hy = trial_data["rects"][i]
         ax.add_patch(Rectangle(
@@ -753,9 +739,7 @@ def plot_trial(trial_data, result, out_path):
     plt.close(fig)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
-# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_args():
     p = argparse.ArgumentParser(description="UHRC benchmark")

@@ -3,19 +3,15 @@ generate_data.py
 ═══════════════════════
 Generates behavioural cloning data for UHRC forest navigation.
 
-Expert policy: A* path planner on a 2D occupancy grid → velocity commands
-               → PID attitude controller → body wrench actions.
+Expert policy: A* path planner on a 2D occupancy grid -> velocity commands
+               -> PID attitude controller -> body wrench actions.
 
-Replaces the previous potential-field expert which:
-  - Got stuck in local minima (tight gaps discarded as failures)
-  - Produced wide detour paths (model learned suboptimal avoidance)
-  - Systematically excluded difficult scenarios from training data
 
 A* guarantees:
   - Finds the shortest collision-free path if one exists
   - Navigates tight gaps the potential field would miss
   - Consistent path quality across all obstacle configurations
-  - Episodes only fail if truly no path exists (correctly excluded)
+  - Episodes only fail if truly no path exists 
 """
 
 import os
@@ -40,11 +36,11 @@ GOAL_RANGE     = 15.0
 MAX_RANGE      = LIDAR_RANGE
 NUM_OBSTACLES  = 8
 
-OUTPUT_FILE    = "data/expert_data.npz"   # matches DATA_PATH in train_uhrc.py
+OUTPUT_FILE    = "data/expert_data.npz"   
 
 V_MAX          = 2.0
 HOVER_STEPS    = 150   # steps to hover at goal after reaching it (1.5s at DT=0.01)
-REACH_RADIUS   = 0.5   # success radius for reaching the goal (metres) — episode ends when reached
+REACH_RADIUS   = 0.5   
 
 # ── A* grid parameters 
 GRID_RES       = 0.25    # metres per cell — finer = more accurate, slower
@@ -529,10 +525,10 @@ def run():
         path    = smooth_path(path, iterations=5)
         tracker = PathTracker(path, lookahead=0.8, v_max=V_MAX)
 
-        # Random initial yaw — model must learn to navigate from any heading,
+        # Random initial yaw 
         init_yaw = np.random.uniform(-np.pi, np.pi)
         cy, sy   = np.cos(init_yaw / 2), np.sin(init_yaw / 2)
-        q_init   = np.array([cy, 0.0, 0.0, sy])   # yaw-only quaternion
+        q_init   = np.array([cy, 0.0, 0.0, sy])   
 
         v_init = np.zeros(3)
 
@@ -543,7 +539,6 @@ def run():
             to_goal_dir = to_goal / (np.linalg.norm(to_goal) + 1e-6)
             v_init = np.array([-to_goal_dir[0] * 2.0, -to_goal_dir[1] * 2.0, 0.0])
 
-        # Pass v_init to the state 
         x_curr    = dyn.pack_state(start, v_init, q_init,
                                    np.zeros(3), np.zeros(4))
 
@@ -606,7 +601,6 @@ def run():
                         'psi': psi_ref, 'z': r_virtual[2]}
             u_expert = att_ctrl.step(x_curr, refs, DT)
 
-            # ── Termination checks ────────────────────────────────────────────
             for (c_obs, r_obs) in obstacles:
                 if np.linalg.norm(r_I[:2] - np.asarray(c_obs[:2])) <= float(r_obs):
                     crashed = True

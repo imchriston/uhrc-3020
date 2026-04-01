@@ -5,7 +5,7 @@ windowed sequence samples for offline behavioural cloning.
 
 Key design decisions
 ─────────────────────
-• obs      (49-dim body-frame) — z-scored so the encoder sees unit-variance inputs
+• obs      (45-dim body-frame) — z-scored so the encoder sees unit-variance inputs
 • actions  (4-dim wrench)      — NOT normalised; model predicts raw Newtons/Nm
 • subgoals (3-dim velocity)    — NOT normalised; model predicts raw m/s
   (magnitude carries urgency information that z-scoring would destroy)
@@ -28,13 +28,10 @@ class ControlDataset(Dataset):
         subgoals   = data["subgoals"].astype(np.float32)   # [N, 3]   raw m/s
         episode_id = data["episode_id"].astype(np.int32)   # [N]
 
-        # ── Normalisation stats ───────────────────────────────────────────────
-        # Computed from full dataset so they're always consistent with the data.
-        # Actions and subgoals intentionally excluded — raw physical units only.
+        # Computed from full dataset so theyre always consistent with the data.
         self.obs_mean = obs.mean(0).astype(np.float32)
         self.obs_std  = (obs.std(0) + 1e-6).astype(np.float32)
 
-        # Still expose act/sub stats for diagnostics / controller loading
         self.act_mean = actions.mean(0).astype(np.float32)
         self.act_std  = (actions.std(0) + 1e-6).astype(np.float32)
         self.sub_mean = subgoals.mean(0).astype(np.float32)
@@ -42,13 +39,11 @@ class ControlDataset(Dataset):
 
         if normalize:
             obs = (obs - self.obs_mean) / self.obs_std
-            # actions and subgoals deliberately left in raw units
 
         self.obs      = torch.from_numpy(obs)
         self.actions  = torch.from_numpy(actions)    # raw Newtons/Nm
         self.subgoals = torch.from_numpy(subgoals)   # raw m/s
 
-        # ── Build sequence windows respecting episode boundaries ──────────────
         self.seq_len              = seq_len
         self.windows: list[tuple[int, int]] = []
         _episode_id_per_window: list[int] = []
@@ -72,7 +67,7 @@ class ControlDataset(Dataset):
         start, end = self.windows[idx]
         T          = self.seq_len
 
-        obs_win = self.obs[start:end]       # [<=T, 49]
+        obs_win = self.obs[start:end]       # [<=T, 45]
         act_win = self.actions[start:end]   # [<=T,  4]
         sub_win = self.subgoals[start:end]  # [<=T,  3]
 
@@ -84,7 +79,7 @@ class ControlDataset(Dataset):
             sub_win = torch.cat([torch.zeros(pad, sub_win.shape[-1]), sub_win], dim=0)
 
         return {
-            "state":   obs_win,   # [seq_len, 49]  z-scored
+            "state":   obs_win,   # [seq_len, 45]  z-scored
             "action":  act_win,   # [seq_len,  4]  raw Newtons/Nm
             "subgoal": sub_win,   # [seq_len,  3]  raw m/s
         }

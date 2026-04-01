@@ -1,12 +1,11 @@
 """
 train_uhrc.py  —  UHRC Hierarchical Behavioural Cloning
-════════════════════════════════════════════════════════════════════════════════
-Uses uhrc_fixed architecture where:
+Uses  architecture where:
   - H-level subgoal is injected into L-level BEFORE the final attention pass
   - Carry is a rolling buffer (UHRCCarry) not a flat tensor
   - Model takes [B, T, 49] for training — processes each timestep sequentially
     so the carry rolls correctly through time
-  - SEQ_LEN controls gradient window width, NOT temporal memory
+  - SEQ_LEN controls gradient window width
     (temporal memory comes from carry_len=16 in the architecture)
 
 Loss terms:
@@ -48,7 +47,7 @@ MAX_EPISODES = None
 
 EPOCHS        = 20
 WARMUP_EPOCHS = 5        
-BATCH_SIZE    = 512      # halved from 256 to accommodate SEQ_LEN=8
+BATCH_SIZE    = 512      
 LEARNING_RATE = 2e-4
 WEIGHT_DECAY  = 3e-3     
 GRAD_CLIP     = 1.0
@@ -319,7 +318,6 @@ def train() -> None:
     use_amp     = USE_AMP and device.type == "cuda"
     scaler      = torch.cuda.amp.GradScaler(enabled=use_amp)
 
-    # ── Resume ────────────────────────────────────────────────────────────────
     start_epoch   = 0
     best_val_loss = float("inf")
     if RESUME_FROM and os.path.exists(str(RESUME_FROM)):
@@ -347,7 +345,6 @@ def train() -> None:
     print(f"  AMP: {'ON' if use_amp else 'OFF'}  "
           f"batch={BATCH_SIZE}  SEQ_LEN={SEQ_LEN}  STRIDE={STRIDE}")
 
-    # ── Training loop ─────────────────────────────────────────────────────────
     hdr = (f"\n{'Ep':>5}  {'T-Loss':>8}  {'T-Act':>8}  {'T-Sub':>8}  "
            f"{'T-Trk':>8}  {'V-Loss':>8}  {'V-Act':>8}  {'V-Sub':>8}  "
            f"{'LR':>8}  {'s':>6}")

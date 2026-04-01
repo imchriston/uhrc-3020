@@ -10,22 +10,21 @@ from generate_data import get_lidar_scan, sample_forest
 from uhrc_ctrl import UHRCController
 import utils.quat_euler as quat_euler
 
+"""
+Simple Evaluation script for UHRC can be run in two modes: batch or single.
+- Batch mode: `python uhrc_eval.py batch [N]` runs N randomised episodes and reports success rate.
+- Single mode: `python uhrc_eval.py` runs one episode with a random start/goal and visualizes the path."""
 
-# ── Config ────────────────────────────────────────────────────────────────────
+
 MODEL_PATH  = "checkpoints/uhrc_best.pth"
 STATS_PATH  = "checkpoints/norm_stats.npz"
 
-NUM_OBS     = 4  # 4-8 in training — 4 for cleaner single tests
-MAX_STEPS   = 1500    # match training STEPS
+NUM_OBS     = 4  
+MAX_STEPS   = 1500    
 DT          = 0.01
-GOAL_RADIUS = 1.0   # match training goal reach threshold
+GOAL_RADIUS = 1.0   
 
-# Training distribution — model trained on ALL of these ranges.
-# normal  : start x∈[-9,-6] y∈[-5,5]   goal x∈[6,9] y∈[-5,5]
-# omni    : start/goal anywhere in [-10,10]²
-# close   : start within 5m of goal, anywhere in arena
-# recovery: start x∈[0,11]
-# → safe eval range covers the full omni arena
+
 TRAIN_X = (-10.0, 10.0)
 TRAIN_Y = (-10.0, 10.0)
 
@@ -66,7 +65,6 @@ def run_eval(
     ctrl = UHRCController(MODEL_PATH, STATS_PATH, device="cpu")
     ctrl.reset()
     ctrl.carry=None
-    # Default: sample from the full training arena
     if start is None:
         start = np.array([np.random.uniform(*TRAIN_X),
                           np.random.uniform(*TRAIN_Y), 0.0])
