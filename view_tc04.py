@@ -1,5 +1,5 @@
 """
-report_trial_dynamic.py
+view TC04 dynamic obstacles testcases
 
 Panels produced:
   Window 1 — XY trajectory + dynamic obstacle positions + metric box
@@ -12,11 +12,7 @@ Metrics displayed:
   ITAE  integral time-weighted absolute error      (m·s²)
   PLR   path length / straight-line distance       
 
-Usage:
-  python report_trial_dynamic.py
-  python report_trial_dynamic.py --trial benchmark_results_dynamic/trials/dyn_random_pop_trial004.npz
-  python report_trial_dynamic.py --trial my_trial.npz --no_control
-  python report_trial_dynamic.py --trial my_trial.npz --no_caption
+
 """
 from __future__ import annotations
 
@@ -33,10 +29,8 @@ import matplotlib.patches as mpatches
 from matplotlib.patches import Circle
 from matplotlib.colors import LinearSegmentedColormap
 
-# ── NumPy compatibility shim ──────────────────────────────────────────────────
 _trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz")
 
-# ── Font sizes ────────────────────────────────────────────────────────────────
 TITLE_FS  = 14
 LABEL_FS  = 13
 TICK_FS   = 11
@@ -44,7 +38,6 @@ LEGEND_FS = 11
 ANNOT_FS  = 10
 METRIC_FS = 10
 
-# ── Palette ───────────────────────────────────────────────────────────────────
 BG         = "#FFFFFF"
 PANEL_BG   = "#F7F8FA"
 GRID_COL   = "#DADDE3"

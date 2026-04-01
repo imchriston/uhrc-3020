@@ -1,7 +1,6 @@
 """
 generate_data.py
-═══════════════════════
-Generates behavioural cloning data for UHRC forest navigation.
+Generates behavioural cloning data 
 
 Expert policy: A* path planner on a 2D occupancy grid -> velocity commands
                -> PID attitude controller -> body wrench actions.

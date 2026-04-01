@@ -1,6 +1,5 @@
 """
 uhrc_ctrl_wp.py — UHRC Controller with Waypoint Output
-═══════════════════════════════════════════════════════════════════════════════
 
 """
 from __future__ import annotations
