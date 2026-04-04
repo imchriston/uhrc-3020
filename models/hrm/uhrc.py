@@ -1,15 +1,11 @@
-# Based on the Hierarchical Reasoning Model architecture
-# Reference: Wang, G. et al. (2025). arXiv:2506.21734
-
-import math
 from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn
 from pydantic import BaseModel
-
-
 
 
 def uhrc_trunc_normal_(tensor: torch.Tensor, std: float = 1.0):
@@ -131,9 +127,6 @@ class UHRC_RoPE(nn.Module):
         return self.cos_cached, self.sin_cached   # [T, D//2]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────────────────────
 
 class UHRC_Config(BaseModel):
     # Observation layout: v_B(3)|w_B(3)|g_B(3)|goal_rel_B(3)|goal_dist(1)|Omega(4)|lidar(32)
@@ -146,7 +139,6 @@ class UHRC_Config(BaseModel):
 
     # Carry / temporal memory
     carry_len:   int   = 16   # number of past hidden states kept in carry
-                               # (replaces seq_len window — true rolling buffer)
 
     hidden_size: int   = 256
     expansion:   float = 4.0
@@ -156,10 +148,8 @@ class UHRC_Config(BaseModel):
 
     hover_thrust: float = 9.81
 
-    # FIX 1: H_cycles must be >= 2 for mutual refinement.
-    # With H_cycles=1, L ran using old z_H, H updated, done — no feedback.
-    # With H_cycles=2, round-2 L sees the H that already saw round-1 L.
-    H_cycles: int = 2     # was 1 — CHANGED
+    # Fixed layers and cycles (ablation parameters)
+    H_cycles: int = 2     
     L_cycles: int = 2
 
     H_layers: int = 2
@@ -168,9 +158,6 @@ class UHRC_Config(BaseModel):
     detach_carry: bool = True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Carry dataclass
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class UHRCCarry:
@@ -178,9 +165,7 @@ class UHRCCarry:
     z_L: torch.Tensor   # [B, carry_len, hidden_size]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Transformer block (shared by H and L)
-# ─────────────────────────────────────────────────────────────────────────────
 
 class UHRCBlock(nn.Module):
     def __init__(self, config: UHRC_Config):
@@ -197,9 +182,7 @@ class UHRCBlock(nn.Module):
         return x
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Reasoning module
-# ─────────────────────────────────────────────────────────────────────────────
 
 class UHRCReasoningModule(nn.Module):
     def __init__(self, layers):
@@ -215,16 +198,15 @@ class UHRCReasoningModule(nn.Module):
         return z
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# UHRC Inner
-# ─────────────────────────────────────────────────────────────────────────────
+
+
 class UHRC_Inner(nn.Module):
     def __init__(self, config: UHRC_Config):
         super().__init__()
         self.config = config
         H = config.hidden_size
 
-        # ── Input encoder ────────────────────────────────────────────────────
+        #input encoder: obs [B, 45] → [B, H]
         scalar_dim    = config.state_dim - config.lidar_dim   # 45 - 32 = 13
         lidar_out_dim = config.lidar_conv_channels * config.lidar_dim
 
@@ -243,20 +225,20 @@ class UHRC_Inner(nn.Module):
         self.lidar_proj    = UHRC_Linear(lidar_out_dim,  H // 2)
         self.fusion        = UHRC_Linear(H,              H)
 
-        # ── H / L reasoning modules ──────────────────────────────────────────
+        # H / L reasoning modules 
         self.H_level = UHRCReasoningModule(
             [UHRCBlock(config) for _ in range(config.H_layers)])
         self.L_level = UHRCReasoningModule(
             [UHRCBlock(config) for _ in range(config.L_layers)])
 
-        # ── Planning head (H → subgoal) ───────────────────────────────────────
+        # Planning head (H → subgoal) 
         self.planning_head = nn.Sequential(
             UHRC_Linear(H, 64),
             nn.SiLU(),
             UHRC_Linear(64, config.subgoal_dim),
         )
 
-        # ── Subgoal → L gated injection ───────────────────────────────────────
+        # Subgoal → L gated injection
         self.subgoal_proj = nn.Sequential(
             UHRC_Linear(config.subgoal_dim, H),
             nn.SiLU(),
@@ -266,23 +248,23 @@ class UHRC_Inner(nn.Module):
             nn.Sigmoid(),
         )
 
-        # ── Action head (L → wrench) ──────────────────────────────────────────
+        # Action head (L → wrench
         self.action_head = UHRC_Linear(H, config.action_dim)
 
-        # ── Positional encoding ───────────────────────────────────────────────
+        #  Positional encoding 
         self.rotary_emb = UHRC_RoPE(
             dim=H // config.num_heads,
             max_seq_len=config.carry_len + 1,
             base=config.rope_theta,
         )
 
-        # ── Carry initialisation ──────────────────────────────────────────────
+        # Carry initialisation 
         self.H_init = nn.Buffer(
             uhrc_trunc_normal_(torch.empty(H), std=1.0), persistent=True)
         self.L_init = nn.Buffer(
             uhrc_trunc_normal_(torch.empty(H), std=1.0), persistent=True)
 
-        # ── Head initialisations ──────────────────────────────────────────────
+        # Head initialisations 
         with torch.no_grad():
             assert isinstance(self.action_head, UHRC_Linear)
             nn.init.normal_(self.action_head.weight, std=0.01)
@@ -306,9 +288,9 @@ class UHRC_Inner(nn.Module):
             assert gate_linear.bias is not None
             gate_linear.bias.fill_(2.0)
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # Helpers 
 
-    def encode_obs(self, state: torch.Tensor) -> torch.Tensor:
+    def _encode_obs(self, state: torch.Tensor) -> torch.Tensor:
         """[B, 45] → [B, H]"""
         scalar = state[..., : self.config.state_dim - self.config.lidar_dim]
         lidar  = state[..., self.config.state_dim - self.config.lidar_dim :]
@@ -328,12 +310,12 @@ class UHRC_Inner(nn.Module):
                            .expand(batch_size, CL, H).clone(),
         )
 
-    def roll_carry(self, carry_vec: torch.Tensor,
+    def _roll_carry(self, carry_vec: torch.Tensor,
                     new_token: torch.Tensor) -> torch.Tensor:
         return torch.cat([carry_vec[:, 1:, :],
                           new_token.unsqueeze(1)], dim=1)
 
-    # ── Forward ───────────────────────────────────────────────────────────────
+    # Forward 
 
     def forward(
         self,
@@ -350,14 +332,16 @@ class UHRC_Inner(nn.Module):
 
         cos, sin = self.rotary_emb()
 
-        # ── Encode current observation ────────────────────────────────────
-        new_emb = self.encode_obs(state)    # [B, H]
+        # Encode current observation 
+        new_emb = self._encode_obs(state)    # [B, H]
 
-        # ── Build sequences: [carry(16) | current_obs(1)] = [B, 17, H] ──
+        #Build sequences: [carry(16) | current_obs(1)] = [B, 17, H]
         seq_H = torch.cat([carry.z_H, new_emb.unsqueeze(1)], dim=1)
         seq_L = torch.cat([carry.z_L, new_emb.unsqueeze(1)], dim=1)
 
-  
+        # In the HRM, input_embeddings is added to z_H at EVERY L-level
+        # In the UHRC, only position 16 (current obs) has a raw input.
+        # Carry positions (0-15) have no corresponding raw input.
         obs_injection = torch.zeros_like(seq_H)       # [B, 17, H]
         obs_injection[:, -1, :] = new_emb              # raw obs at pos 16
 
@@ -367,6 +351,24 @@ class UHRC_Inner(nn.Module):
         HC = self.config.H_cycles   # 2
         LC = self.config.L_cycles   # 2
 
+        #
+        # Original HRM (lines 189-204 of hrm_act_v1.py):
+        #   with torch.no_grad():
+        #       for h in H_cycles:
+        #           for l in L_cycles:
+        #               if not (h==last and l==last): L(z_L, z_H + input)
+        #           if not h==last: H(z_H, z_L)
+        #   # 1-step grad:
+        #   z_L = L(z_L, z_H + input)    gradient ON
+        #   z_H = H(z_H, z_L)            gradient ON
+        #
+        # With H=2, L=2 this gives:
+        #   no_grad: L, L, H, L  (3 L calls + 1 H call)
+        #   grad:    L, H        (1 L call + 1 H call)
+        #
+        # Gradient path: action  L_final(2 layers) -->  H_final(2 layers)
+        #                --> input_encoder = 4 transformer layers total.
+        # This is 3.5× shallower than gradient through all 14 layers.
 
         with torch.no_grad():
             for h in range(HC):
@@ -379,33 +381,31 @@ class UHRC_Inner(nn.Module):
                 if h < HC - 1:
                     z_H = self.H_level(z_H, z_L, cos=cos, sin=sin)
 
-        # ── 1-step gradient: only these two calls build the graph ─────────
+        # 1-step gradient: only these two calls build the graph 
         z_L = self.L_level(z_L, z_H + obs_injection, cos=cos, sin=sin)
         z_H = self.H_level(z_H, z_L, cos=cos, sin=sin)
 
-        # ── H → subgoal ──────────────────────────────────────────────────
+        #  H → subgoal 
         subgoal = self.planning_head(z_H[:, -1, :])   # [B, 3]
 
-        # ── Subgoal injection → final L pass → action ────────────────────
+        # Subgoal injection → final L pass → action 
         gate            = self.subgoal_gate(subgoal)          # [B, H]
         subgoal_context = self.subgoal_proj(subgoal) * gate   # [B, H]
         z_L_final = z_L + subgoal_context.unsqueeze(1)        # [B, 17, H]
         for layer in self.L_level.layers:
             z_L_final = layer(z_L_final, cos, sin)
 
-        # ── L → action ───────────────────────────────────────────────────
+        # L → action 
         action = self.action_head(z_L_final[:, -1, :])        # [B, 4]
 
-        # ── Carry update (always detached — HRM convention) ──────────────
-        new_z_H = self.roll_carry(carry.z_H, z_H[:, -1, :].detach())
-        new_z_L = self.roll_carry(carry.z_L, z_L_final[:, -1, :].detach())
+        # Carry update (always detached — HRM convention) 
+        new_z_H = self._roll_carry(carry.z_H, z_H[:, -1, :].detach())
+        new_z_L = self._roll_carry(carry.z_L, z_L_final[:, -1, :].detach())
 
         new_carry = UHRCCarry(z_H=new_z_H, z_L=new_z_L)
         return new_carry, action, subgoal
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Outer wrapper
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 class UHRC(nn.Module):
     def __init__(self, config: UHRC_Config):
@@ -420,7 +420,7 @@ class UHRC(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, UHRCCarry]:
         """
         Args:
-            state  : [B, 49]
+            state  : [B, 45]
             carry  : UHRCCarry or None (auto-init)
         Returns:
             action  : [B, 4]   motor wrench [Fz, τx, τy, τz]
@@ -428,7 +428,7 @@ class UHRC(nn.Module):
             carry   : updated UHRCCarry
         """
         if state.ndim == 3:
-            # BC training passes [B, T, 45] 
+            # BC training passes [B, T, 45] — process each step sequentially
             # so the carry rolls correctly through time.
             actions:  list[torch.Tensor] = []
             subgoals: list[torch.Tensor] = []

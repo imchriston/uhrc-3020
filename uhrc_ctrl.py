@@ -12,7 +12,6 @@ import utils.quat_euler as quat_euler
 MAX_LIDAR_RANGE = 5.0
 GOAL_RANGE      = 20.0
 
-# ── Toggle this when retraining with SEQ_LEN >= 2 ────────────────────────
 PERSISTENT_CARRY = True   # False = reset every step (matches SEQ_LEN=1 training)
 
 
@@ -30,11 +29,11 @@ def _load_checkpoint(model, path, device):
         compatible[k] = v
     missing, _ = model.load_state_dict(compatible, strict=False)
     if size_skipped:
-        print(f"⚠️  {len(size_skipped)} layer(s) skipped (shape mismatch)")
+        print(f"{len(size_skipped)} layer(s) skipped (shape mismatch)")
     if missing:
-        print(f"⚠️  {len(missing)} layer(s) randomly initialised")
+        print(f" {len(missing)} layer(s) randomly initialised")
     if not size_skipped and not missing:
-        print("✅  Checkpoint loaded cleanly.")
+        print(" Checkpoint loaded cleanly.")
 
 
 class UHRCController:
@@ -107,7 +106,7 @@ class UHRCController:
         obs = self._build_obs(r_I, v_I, q_BI, w_B, lidar, goal_pos)
         return self._infer(obs)
 
-    # ── Observation (45-dim, NO Omega) ────────────────────────────────────
+    # Observation (45-dim
     def _build_obs(self, r_I, v_I, q_BI, w_B, lidar, goal_pos):
         """
         Build 45-dim observation.  Layout MUST match generate_data.py build_obs():
@@ -139,13 +138,13 @@ class UHRCController:
         assert obs.shape == (45,), f"Obs shape {obs.shape} != (45,)"
         return obs
 
-    # ── Inference ─────────────────────────────────────────────────────────
+    #  Inference 
     def _infer(self, obs):
         x_norm = (torch.from_numpy(obs).float().to(self.device)
                   - self.obs_mean) / self.obs_std
         x_input = x_norm.unsqueeze(0)   # [1, 45]
 
-        # ── CARRY POLICY ──────────────────────────────────────────────────
+        # CARRY POLICY 
 
         if not PERSISTENT_CARRY:
             self.carry = None

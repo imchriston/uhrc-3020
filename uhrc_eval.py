@@ -23,8 +23,8 @@ NUM_OBS     = 4
 MAX_STEPS   = 1500    
 DT          = 0.01
 GOAL_RADIUS = 1.0   
-
-
+#change this to view different randomized intial starts and goals 
+SEED=123
 TRAIN_X = (-10.0, 10.0)
 TRAIN_Y = (-10.0, 10.0)
 
@@ -89,16 +89,12 @@ def run_eval(
         r_I0, _, q_BI0, *_ = dyn.unpack_state(x_curr)
         R_BI0      = quat_euler.R_BI_from_q(q_BI0)
         goal_body0 = R_BI0 @ (goal - r_I0)
-        print("── Frame diagnostic ──────────────────────────────────")
         print(f"  goal_world : {(goal - r_I0).round(3)}")
         print(f"  goal_body  : {goal_body0.round(3)}")
         print(f"  R_BI[0,0]  : {R_BI0[0,0]:.4f}  (expect +1 at zero yaw)")
-        conv = "✅ OK" if goal_body0[0] > 0 else "❌ AXIS FLIP"
-        print(f"  Convention : {conv}")
-        print("──────────────────────────────────────────────────────")
         for i, (c, r) in enumerate(obstacles):
             print(f"  Obs {i}: center={np.array(c[:2]).round(2)}  r={float(r):.2f}m")
-        print(f"🚀 start={start[:2].round(2)}  goal={goal[:2].round(2)}"
+        print(f"start={start[:2].round(2)}  goal={goal[:2].round(2)}"
               f"  dist={goal_dist:.1f}m  obs={n_obs}")
 
     path  = []
@@ -136,18 +132,18 @@ def run_eval(
         if crashed:
             path.append(r_new.copy())
             if verbose:
-                print(f"💥 Crash at step {step}  pos={r_new[:2].round(2)}")
+                print(f"Crash at step {step}  pos={r_new[:2].round(2)}")
             return np.array(path), obstacles, goal, False
 
         if reached:
             path.append(r_new.copy())
             if verbose:
-                print(f"✅ Goal reached at step {step}  ({t:.2f}s)")
+                print(f"Goal reached at step {step}  ({t:.2f}s)")
             return np.array(path), obstacles, goal, True
 
     final_dist = float(np.linalg.norm(r_new[:2] - goal[:2]))
     if verbose:
-        print(f"⚠️  Timeout — final dist: {final_dist:.2f}m")
+        print(f"Timeout — final dist: {final_dist:.2f}m")
     return np.array(path), obstacles, goal, False
 
 
@@ -190,7 +186,6 @@ def batch_eval(n: int = 20, seed_offset: int = 0) -> float:
     for i in range(n):
         _, _, _, ok = run_eval(seed=seed_offset + i, verbose=False)
         results.append(ok)
-        print(f"  ep {i+1:3d}/{n}  {'✅' if ok else '❌'}", flush=True)
     rate = float(np.mean(results)) * 100.0
     print(f"\n  Result: {sum(results)}/{n} ({rate:.0f}%)")
     return rate
@@ -204,7 +199,7 @@ if __name__ == "__main__":
         # Single eval — pass explicit start/goal or sample randomly
         # Example fixed scenario:
         #   run_eval(start=np.array([-8.,0.,0.]), goal=np.array([7.,1.,0.]))
-        path, obs, goal, success = run_eval(seed=81000) #8 4
+        path, obs, goal, success = run_eval(seed=SEED) #8 4
         #25541455, 777777
         #Successe, obs=4 : 477
         #304

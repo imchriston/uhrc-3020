@@ -41,7 +41,7 @@ V_MAX          = 2.0
 HOVER_STEPS    = 150   # steps to hover at goal after reaching it (1.5s at DT=0.01)
 REACH_RADIUS   = 0.5   
 
-# ── A* grid parameters 
+# A* grid parameters 
 GRID_RES       = 0.25    # metres per cell — finer = more accurate, slower
 GRID_MARGIN    = 2.0     # padding around start/goal bounding box (metres)
 INFLATE_RADIUS = 0.4     # robot body radius added to obstacle radii for safety
@@ -393,7 +393,7 @@ def flush_to_disk(output_file, batch_obs, batch_actions, batch_subgoals,
 
     total_eps  = int(merged["episode_id"].max()) + 1
     total_trans = len(merged["obs"])
-    print(f"\n  💾 Flush #{flush_num}: saved {total_eps:,} eps / {total_trans:,} transitions → {output_file}")
+    print(f"\n  Flush #{flush_num}: saved {total_eps:,} eps / {total_trans:,} transitions → {output_file}")
 
 
 def run():
@@ -419,14 +419,14 @@ def run():
     if os.path.exists(OUTPUT_FILE):
         old = np.load(OUTPUT_FILE)
         successful_episodes = int(old["episode_id"].max()) + 1
-        print(f"📂 Resuming — existing file has {successful_episodes:,} episodes, "
+        print(f" Resuming — existing file has {successful_episodes:,} episodes, "
               f"{len(old['obs']):,} transitions")
 
     print(f"🌲 Generating forest data (A* expert): episodes={NUM_EPISODES}, steps={STEPS}, dt={DT}")
 
     for ep in tqdm(range(NUM_EPISODES)):
 
-        # ── Episode type sampling ─────────────────────────────────────────────
+        # Episode type sampling 
         # 40% normal   — x∈[-9,-6] → x∈[6,9], full forest (+X dominant)
         # 20% no-obs   — same range, empty space, pure goal-seeking
         # 10% close    — 1-5m from goal, any direction
@@ -703,7 +703,7 @@ def run():
                       batch_obs_packs, flush_count)
 
     final = np.load(OUTPUT_FILE)
-    print(f"\n✅ Done — {OUTPUT_FILE}")
+    print(f"\nDone — {OUTPUT_FILE}")
     print(f"   Successful episodes:  {successful_episodes:,} / {NUM_EPISODES:,}")
     print(f"   No-path skipped:      {no_path_count:,}")
     print(f"   Total transitions:    {len(final['obs']):,}")

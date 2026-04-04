@@ -1,14 +1,11 @@
 """
 ControlDataset
-Loads the forest_data.npz produced by generate_forest_data.py and serves
-windowed sequence samples for offline behavioural cloning.
+
 
 Key design decisions
-─────────────────────
 • obs      (45-dim body-frame) — z-scored so the encoder sees unit-variance inputs
 • actions  (4-dim wrench)      — NOT normalised; model predicts raw Newtons/Nm
 • subgoals (3-dim velocity)    — NOT normalised; model predicts raw m/s
-  (magnitude carries urgency information that z-scoring would destroy)
 • Windows never cross episode boundaries (avoids leaking terminal states into
   the middle of sequences)
 • Short windows at episode starts are left-padded with zeros
@@ -23,7 +20,7 @@ class ControlDataset(Dataset):
     def __init__(self, data_path: str, seq_len: int = 8, normalize: bool = True):
         data = np.load(data_path, allow_pickle=False)
 
-        obs        = data["obs"].astype(np.float32)        # [N, 49]
+        obs        = data["obs"].astype(np.float32)        # [N, 45]
         actions    = data["actions"].astype(np.float32)    # [N, 4]   raw Newtons/Nm
         subgoals   = data["subgoals"].astype(np.float32)   # [N, 3]   raw m/s
         episode_id = data["episode_id"].astype(np.int32)   # [N]

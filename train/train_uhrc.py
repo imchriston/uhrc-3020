@@ -40,7 +40,7 @@ from uhrc_dataset import ControlDataset
 
 
 
-DATA_PATH    = "data/Astardata.npz"
+DATA_PATH    = "data/expert_data.npz"
 
 # SEQ_LEN=8 trains the carry across 8 consecutive steps per gradient update 
 SEQ_LEN      =8
@@ -232,7 +232,7 @@ def train() -> None:
     print(f"\nUHRC Training (uhrc_fixed) — device={device}")
     os.makedirs(SAVE_DIR, exist_ok=True)
 
-    # ── Dataset ───────────────────────────────────────────────────────────────
+    #  Dataset 
     data_path = Path(DATA_PATH)
     if not data_path.exists():
         print(f"[ERROR] Data not found: {data_path}")
@@ -294,7 +294,7 @@ def train() -> None:
         shuffle=False, **_wkw,
     )
 
-    # ── Model ─────────────────────────────────────────────────────────────────
+    # Model 
     config = UHRC_Config(
         hidden_size  = HIDDEN_SIZE,
         carry_len    = CARRY_LEN,
@@ -325,12 +325,12 @@ def train() -> None:
     best_val_loss = float("inf")
     if RESUME_FROM and os.path.exists(str(RESUME_FROM)):
         ckpt = torch.load(str(RESUME_FROM), map_location=device)
-        # Load model weights — strict=False tolerates minor arch changes
+        # Load model weights
         missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
         if missing:
-            print(f"  ⚠️  {len(missing)} layers not in checkpoint (random init)")
+            print(f"  {len(missing)} layers not in checkpoint (random init)")
         if unexpected:
-            print(f"  ⚠️  {len(unexpected)} unexpected keys ignored")
+            print(f"  {len(unexpected)} unexpected keys ignored")
         optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch   = ckpt.get("epoch", 0)
         best_val_loss = ckpt.get("val_loss", float("inf"))
@@ -339,7 +339,6 @@ def train() -> None:
     else:
         print("  Training from scratch")
 
-    # torch.compile (PyTorch ≥ 2.0)
     if COMPILE_MODEL and hasattr(torch, "compile"):
         print("  Compiling model...")
         model = cast(nn.Module, torch.compile(model))
@@ -381,7 +380,7 @@ def train() -> None:
             if improved:
                 best_val_loss = val_m["loss"]
                 torch.save(get_raw_state_dict(model),
-                           os.path.join(SAVE_DIR, "uhrc_bestA*.pth"))
+                           os.path.join(SAVE_DIR, "uhrc_best.pth"))
 
             raw_sd = get_raw_state_dict(model)
             torch.save(
@@ -389,11 +388,11 @@ def train() -> None:
                  "optimizer": optimizer.state_dict(),
                  "config": config.model_dump(),
                  "val_loss": val_m["loss"]},
-                os.path.join(SAVE_DIR, "uhrc_latestA*.pth"),
+                os.path.join(SAVE_DIR, "uhrc_latest.pth"),
             )
 
             elapsed = time.time() - t0
-            marker  = "  ✓" if improved else ""
+            marker  = "  Saved best checkpoint" if improved else ""
             tqdm.write(
                 f"{epoch+1:>5}  "
                 f"{train_m['loss']:>8.4f}  {train_m['action']:>8.4f}  "
@@ -423,8 +422,8 @@ def train() -> None:
 
     epoch_bar.close()
     print(f"\nDone.  Best val: {best_val_loss:.4f}")
-    print(f"  Best    : {SAVE_DIR}/uhrc_bestA*.pth")
-    print(f"  Latest  : {SAVE_DIR}/uhrc_latestA*.pth\n")
+    print(f"  Best    : {SAVE_DIR}/uhrc_best.pth")
+    print(f"  Latest  : {SAVE_DIR}/uhrc_latest.pth\n")
 
 
 if __name__ == "__main__":
