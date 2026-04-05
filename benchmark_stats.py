@@ -35,14 +35,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import dynamics
-from generate_data_sensors import get_lidar_scan
-from uhrc_ctrl_wp import UHRCController
+import drone.dynamics as dynamics
+from generate_data import get_lidar_scan
+from uhrc_ctrl import UHRCController
 import utils.quat_euler as quat_euler
 
 
-MODEL_PATH = "checkpoints/uhrc_best_waypoint.pth"
-STATS_PATH = "checkpoints/norm_stats_waypoint.npz"
+MODEL_PATH = "checkpoints/uhrc_best.pth"
+STATS_PATH = "checkpoints/norm_stats.npz"
 
 DT               = 0.01
 MAX_STEPS        = 1500

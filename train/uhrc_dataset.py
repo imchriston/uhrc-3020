@@ -6,8 +6,7 @@ Key design decisions
 • obs      (45-dim body-frame) — z-scored so the encoder sees unit-variance inputs
 • actions  (4-dim wrench)      — NOT normalised; model predicts raw Newtons/Nm
 • subgoals (3-dim velocity)    — NOT normalised; model predicts raw m/s
-• Windows never cross episode boundaries (avoids leaking terminal states into
-  the middle of sequences)
+• Windows never cross episode boundaries 
 • Short windows at episode starts are left-padded with zeros
 """
 from __future__ import annotations
